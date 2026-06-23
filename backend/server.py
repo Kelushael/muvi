@@ -4,11 +4,13 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import shutil
 import subprocess
 import json
 import asyncio
+import imageio_ffmpeg
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -45,19 +47,23 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+
+
 def media_duration(path: Path) -> float:
-    """Return media duration in seconds using ffprobe (0.0 on failure)."""
+    """Return media duration in seconds by parsing ffmpeg output (0.0 on failure)."""
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "json", str(path)],
+            [FFMPEG, "-i", str(path)],
             capture_output=True, text=True, timeout=60,
         )
-        data = json.loads(out.stdout or "{}")
-        return float(data.get("format", {}).get("duration", 0.0) or 0.0)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out.stderr)
+        if m:
+            h, mn, s = m.groups()
+            return int(h) * 3600 + int(mn) * 60 + float(s)
     except Exception as e:
-        logger.warning(f"ffprobe failed for {path}: {e}")
-        return 0.0
+        logger.warning(f"duration probe failed for {path}: {e}")
+    return 0.0
 
 
 def public_url(kind: str, filename: str) -> str:
@@ -75,7 +81,9 @@ class Clip(BaseModel):
     filename: str
     url: str
     song_start: float = 0.0      # position in the song (seconds) where clip is placed
-    duration: float = 0.0        # clip length in seconds
+    duration: float = 0.0        # clip length in seconds (recorded)
+    trim_start: float = 0.0      # trim in-point (seconds within clip)
+    trim_end: float = 0.0        # trim out-point (0 = use full duration)
     source: str = "camera"       # camera | gallery
     filter: str = "none"
     created_at: str = Field(default_factory=now_iso)
@@ -198,6 +206,35 @@ async def delete_clip(project_id: str, clip_id: str):
     return Project(**clean_project(doc))
 
 
+class ClipUpdate(BaseModel):
+    trim_start: Optional[float] = None
+    trim_end: Optional[float] = None
+    song_start: Optional[float] = None
+
+
+@api_router.patch("/projects/{project_id}/clips/{clip_id}", response_model=Project)
+async def update_clip(project_id: str, clip_id: str, body: ClipUpdate):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    sets = {}
+    if body.trim_start is not None:
+        sets["clips.$[c].trim_start"] = max(body.trim_start, 0.0)
+    if body.trim_end is not None:
+        sets["clips.$[c].trim_end"] = max(body.trim_end, 0.0)
+    if body.song_start is not None:
+        sets["clips.$[c].song_start"] = max(body.song_start, 0.0)
+    if sets:
+        sets["updated_at"] = now_iso()
+        sets["output_url"] = None
+        await db.projects.update_one(
+            {"id": project_id}, {"$set": sets},
+            array_filters=[{"c.id": clip_id}],
+        )
+        doc = await db.projects.find_one({"id": project_id})
+    return Project(**clean_project(doc))
+
+
 @api_router.post("/projects/{project_id}/compile", response_model=Project)
 async def compile_project(project_id: str):
     doc = await db.projects.find_one({"id": project_id})
@@ -208,7 +245,13 @@ async def compile_project(project_id: str):
         raise HTTPException(400, "No clips to compile")
 
     audio_path = AUDIO_DIR / project.audio_filename
-    total = max(project.audio_duration, 0.5)
+    total = project.audio_duration
+    if total <= 0:
+        total = media_duration(audio_path)
+        if total > 0:
+            await db.projects.update_one(
+                {"id": project_id}, {"$set": {"audio_duration": total}})
+    total = max(total, 0.5)
 
     clips = sorted(project.clips, key=lambda c: c.song_start)
 
@@ -221,10 +264,17 @@ async def compile_project(project_id: str):
     last = "0:v"  # black base
     for idx, c in enumerate(clips, start=1):
         start = max(c.song_start, 0.0)
-        dur = c.duration if c.duration > 0 else 2.0
-        end = min(start + dur, total)
+        full = c.duration if c.duration > 0 else (media_duration(CLIP_DIR / c.filename) or 2.0)
+        ts = max(c.trim_start, 0.0)
+        te = c.trim_end if (c.trim_end and c.trim_end > 0) else full
+        te = min(te, full)
+        if te <= ts:
+            ts, te = 0.0, full
+        eff = max(te - ts, 0.2)
+        end = min(start + eff, total)
         filters.append(
-            f"[{idx}:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"[{idx}:v]trim=start={ts:.3f}:end={te:.3f},setpts=PTS-STARTPTS,"
+            f"scale={W}:{H}:force_original_aspect_ratio=increase,"
             f"crop={W}:{H},setsar=1,fps={FPS},format=yuv420p,"
             f"tpad=start_duration={start:.3f}:start_mode=clone,"
             f"setpts=PTS-STARTPTS[v{idx}]"
@@ -240,7 +290,7 @@ async def compile_project(project_id: str):
     out_name = f"{project.id}.mp4"
     out_path = OUTPUT_DIR / out_name
 
-    cmd = ["ffmpeg", "-y", *inputs, "-i", str(audio_path),
+    cmd = [FFMPEG, "-y", *inputs, "-i", str(audio_path),
            "-filter_complex", filter_complex,
            "-map", f"[{last}]", "-map", f"{len(clips)+1}:a",
            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",

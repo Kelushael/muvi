@@ -6,6 +6,8 @@ export type Clip = {
   url: string;
   song_start: number;
   duration: number;
+  trim_start: number;
+  trim_end: number;
   source: string;
   filter: string;
   created_at: string;
@@ -82,6 +84,17 @@ export const api = {
   deleteClip: (id: string, clipId: string): Promise<Project> =>
     fetch(`${BASE}/api/projects/${id}/clips/${clipId}`, {
       method: "DELETE",
+    }).then(asJson),
+
+  updateClip: (
+    id: string,
+    clipId: string,
+    body: { trim_start?: number; trim_end?: number; song_start?: number },
+  ): Promise<Project> =>
+    fetch(`${BASE}/api/projects/${id}/clips/${clipId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }).then(asJson),
 
   compile: (id: string): Promise<Project> =>

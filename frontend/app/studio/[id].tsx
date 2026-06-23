@@ -29,6 +29,8 @@ import * as Haptics from "expo-haptics";
 import { api, fullUrl, Project, Clip } from "@/src/api";
 import { colors, font, spacing, radius, fmtTime } from "@/src/theme";
 import Waveform from "@/src/components/Waveform";
+import BottomTimeline from "@/src/components/BottomTimeline";
+import TrimBar from "@/src/components/TrimBar";
 
 const FILTERS = [
   { key: "none", label: "None", tint: "transparent" },
@@ -109,6 +111,7 @@ function StudioInner({
   const [uploading, setUploading] = useState(false);
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [menuClip, setMenuClip] = useState<Clip | null>(null);
+  const [trimClip, setTrimClip] = useState<Clip | null>(null);
 
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
@@ -204,6 +207,16 @@ function StudioInner({
       const updated = await api.deleteClip(project.id, clip.id);
       setProject(updated);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+  };
+
+  const updateTrim = async (clip: Clip, ts: number, te: number) => {
+    try {
+      const updated = await api.updateClip(project.id, clip.id, {
+        trim_start: ts,
+        trim_end: te,
+      });
+      setProject(updated);
     } catch {}
   };
 
@@ -357,8 +370,38 @@ function StudioInner({
 
       {/* ===== Bottom controls ===== */}
       <View style={[styles.bottomArea, { paddingBottom: insets.bottom + spacing.md }]}>
+        {trimClip ? (
+          <TrimBar
+            key={trimClip.id}
+            clip={trimClip}
+            width={timelineW}
+            onCommit={(ts, te) => updateTrim(trimClip, ts, te)}
+            onDelete={() => {
+              deleteClip(trimClip);
+              setTrimClip(null);
+            }}
+            onClose={() => {
+              setTrimClip(null);
+              setSelectedClip(null);
+            }}
+          />
+        ) : (
+          <BottomTimeline
+            width={timelineW}
+            duration={duration}
+            position={position}
+            clips={project.clips}
+            selectedClipId={selectedClip?.id ?? null}
+            onSeek={seek}
+            onSelectClip={(c) => {
+              setSelectedClip(c);
+              setTrimClip(c);
+            }}
+          />
+        )}
+
         {/* Filter carousel */}
-        <View style={styles.filterRow}>
+        {!trimClip && <View style={styles.filterRow}>
           {FILTERS.map((f, i) => (
             <Pressable
               key={f.key}
@@ -382,7 +425,7 @@ function StudioInner({
               </Text>
             </Pressable>
           ))}
-        </View>
+        </View>}
 
         <View style={styles.recordRow}>
           <View style={styles.sideSlot} />
