@@ -1,58 +1,283 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import shutil
+import subprocess
+import json
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Storage directories
+MEDIA_DIR = ROOT_DIR / "media"
+AUDIO_DIR = MEDIA_DIR / "audio"
+CLIP_DIR = MEDIA_DIR / "clips"
+OUTPUT_DIR = MEDIA_DIR / "output"
+for d in (AUDIO_DIR, CLIP_DIR, OUTPUT_DIR):
+    d.mkdir(parents=True, exist_ok=True)
 
 # MongoDB connection
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
 app = FastAPI()
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Define Models
-class StatusCheck(BaseModel):
+
+# ---------------------------- Helpers ----------------------------
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def media_duration(path: Path) -> float:
+    """Return media duration in seconds using ffprobe (0.0 on failure)."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        data = json.loads(out.stdout or "{}")
+        return float(data.get("format", {}).get("duration", 0.0) or 0.0)
+    except Exception as e:
+        logger.warning(f"ffprobe failed for {path}: {e}")
+        return 0.0
+
+
+def public_url(kind: str, filename: str) -> str:
+    return f"/api/media/{kind}/{filename}"
+
+
+def clean_project(doc: dict) -> dict:
+    doc.pop("_id", None)
+    return doc
+
+
+# ---------------------------- Models ----------------------------
+class Clip(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    filename: str
+    url: str
+    song_start: float = 0.0      # position in the song (seconds) where clip is placed
+    duration: float = 0.0        # clip length in seconds
+    source: str = "camera"       # camera | gallery
+    filter: str = "none"
+    created_at: str = Field(default_factory=now_iso)
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
+class Project(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    audio_filename: str
+    audio_url: str
+    audio_duration: float = 0.0
+    clips: List[Clip] = []
+    output_url: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+# ---------------------------- Routes ----------------------------
 @api_router.get("/")
 async def root():
-    return {"message": "Hello World"}
+    return {"message": "BeatCam Studio API"}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
+@api_router.get("/projects", response_model=List[Project])
+async def list_projects():
+    docs = await db.projects.find().sort("updated_at", -1).to_list(200)
+    return [Project(**clean_project(d)) for d in docs]
 
-# Include the router in the main app
+
+@api_router.get("/projects/{project_id}", response_model=Project)
+async def get_project(project_id: str):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    return Project(**clean_project(doc))
+
+
+@api_router.post("/projects", response_model=Project)
+async def create_project(title: str = Form(...), audio: UploadFile = File(...)):
+    ext = Path(audio.filename or "track.mp3").suffix or ".mp3"
+    filename = f"{uuid.uuid4()}{ext}"
+    dest = AUDIO_DIR / filename
+    with dest.open("wb") as f:
+        shutil.copyfileobj(audio.file, f)
+    duration = media_duration(dest)
+    project = Project(
+        title=title or "Untitled",
+        audio_filename=filename,
+        audio_url=public_url("audio", filename),
+        audio_duration=duration,
+    )
+    await db.projects.insert_one(project.dict())
+    return project
+
+
+@api_router.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    await db.projects.delete_one({"id": project_id})
+    return {"ok": True}
+
+
+@api_router.post("/projects/{project_id}/clips", response_model=Project)
+async def add_clip(
+    project_id: str,
+    song_start: float = Form(0.0),
+    source: str = Form("camera"),
+    filter: str = Form("none"),
+    video: UploadFile = File(...),
+):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+
+    ext = Path(video.filename or "clip.mp4").suffix or ".mp4"
+    filename = f"{uuid.uuid4()}{ext}"
+    dest = CLIP_DIR / filename
+    with dest.open("wb") as f:
+        shutil.copyfileobj(video.file, f)
+    duration = media_duration(dest)
+
+    clip = Clip(
+        filename=filename,
+        url=public_url("clips", filename),
+        song_start=song_start,
+        duration=duration,
+        source=source,
+        filter=filter,
+    )
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$push": {"clips": clip.dict()},
+         "$set": {"updated_at": now_iso(), "output_url": None}},
+    )
+    doc = await db.projects.find_one({"id": project_id})
+    return Project(**clean_project(doc))
+
+
+@api_router.delete("/projects/{project_id}/clips/{clip_id}", response_model=Project)
+async def delete_clip(project_id: str, clip_id: str):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    for c in doc.get("clips", []):
+        if c["id"] == clip_id:
+            fp = CLIP_DIR / c["filename"]
+            if fp.exists():
+                try:
+                    fp.unlink()
+                except Exception:
+                    pass
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$pull": {"clips": {"id": clip_id}},
+         "$set": {"updated_at": now_iso(), "output_url": None}},
+    )
+    doc = await db.projects.find_one({"id": project_id})
+    return Project(**clean_project(doc))
+
+
+@api_router.post("/projects/{project_id}/compile", response_model=Project)
+async def compile_project(project_id: str):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    project = Project(**clean_project(doc))
+    if not project.clips:
+        raise HTTPException(400, "No clips to compile")
+
+    audio_path = AUDIO_DIR / project.audio_filename
+    total = max(project.audio_duration, 0.5)
+
+    clips = sorted(project.clips, key=lambda c: c.song_start)
+
+    W, H, FPS = 720, 1280, 30
+    inputs = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={FPS}:d={total:.3f}"]
+    for c in clips:
+        inputs += ["-i", str(CLIP_DIR / c.filename)]
+
+    filters = []
+    last = "0:v"  # black base
+    for idx, c in enumerate(clips, start=1):
+        start = max(c.song_start, 0.0)
+        dur = c.duration if c.duration > 0 else 2.0
+        end = min(start + dur, total)
+        filters.append(
+            f"[{idx}:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"crop={W}:{H},setsar=1,fps={FPS},format=yuv420p,"
+            f"tpad=start_duration={start:.3f}:start_mode=clone,"
+            f"setpts=PTS-STARTPTS[v{idx}]"
+        )
+        out = f"o{idx}"
+        filters.append(
+            f"[{last}][v{idx}]overlay=enable='between(t,{start:.3f},{end:.3f})':"
+            f"shortest=0[{out}]"
+        )
+        last = out
+
+    filter_complex = ";".join(filters)
+    out_name = f"{project.id}.mp4"
+    out_path = OUTPUT_DIR / out_name
+
+    cmd = ["ffmpeg", "-y", *inputs, "-i", str(audio_path),
+           "-filter_complex", filter_complex,
+           "-map", f"[{last}]", "-map", f"{len(clips)+1}:a",
+           "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+           "-c:a", "aac", "-b:a", "192k",
+           "-t", f"{total:.3f}", "-movflags", "+faststart", str(out_path)]
+
+    logger.info("Compiling project %s with %d clips", project.id, len(clips))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=240)
+        if proc.returncode != 0:
+            logger.error("ffmpeg error: %s", stderr.decode()[-1500:])
+            raise HTTPException(500, "Compilation failed")
+    except asyncio.TimeoutError:
+        raise HTTPException(500, "Compilation timed out")
+
+    output_url = public_url("output", out_name)
+    await db.projects.update_one(
+        {"id": project_id},
+        {"$set": {"output_url": output_url, "updated_at": now_iso()}},
+    )
+    project.output_url = output_url
+    return project
+
+
+@api_router.get("/media/{kind}/{filename}")
+async def serve_media(kind: str, filename: str):
+    folder = {"audio": AUDIO_DIR, "clips": CLIP_DIR, "output": OUTPUT_DIR}.get(kind)
+    if not folder:
+        raise HTTPException(404, "Not found")
+    fp = folder / filename
+    if not fp.exists():
+        raise HTTPException(404, "File not found")
+    return FileResponse(str(fp))
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -63,12 +288,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
