@@ -1,0 +1,154 @@
+{
+  "app_name": "BeatCam Studio",
+  "personality": "7 Dark-First Utility DARK with Camera Glassmorphism",
+  "personality_one_liner": "A high-contrast, tactical pro-creator tool merging immersive Snapchat-style camera chrome with precise DAW waveform timeline control.",
+  "color": {
+    "surface": "#0D0E12",
+    "onSurface": "#F0F0F2",
+    "surfaceSecondary": "#1A1C23",
+    "onSurfaceSecondary": "#E0E1E5",
+    "surfaceTertiary": "#272A35",
+    "onSurfaceTertiary": "#D1D3D9",
+    "surfaceInverse": "#F0F0F2",
+    "onSurfaceInverse": "#0D0E12",
+    "brand": "#E62E3B",
+    "brandPrimary": "#FF3B4A",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FF7A84",
+    "onBrandSecondary": "#1A0305",
+    "brandTertiary": "#3D1B1E",
+    "onBrandTertiary": "#FFD6D9",
+    "success": "#16B364",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F5A623",
+    "onWarning": "#1A0E00",
+    "error": "#FA3A45",
+    "onError": "#FFFFFF",
+    "info": "#8F95B2",
+    "onInfo": "#0D0E12",
+    "border": "#2A2D35",
+    "borderStrong": "#3D414D",
+    "divider": "#20232B"
+  },
+  "typography": {
+    "displayFontFamily": "Barlow Condensed",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "Keep timeline and camera chrome dense and out of the way. Use generous padding for the record button hit area.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "0",
+  "navigation": "stack_only",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": true,
+    "do's": [
+      "Use heavy frosted glass (blur + >=75% tint opacity) for the top DAW waveform container",
+      "Use glass for the right-side vertical camera tool strip",
+      "Use glass for the double-tap popover menu on clips"
+    ],
+    "dont's": [
+      "Do not blur the actual waveform or recorded clip chips on the timeline",
+      "Do not use glass on the Projects List utility cards"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Projects List",
+      "purpose": "A utility-focused dashboard displaying existing music video drafts and a prominent FAB to start a new project by uploading an MP3.",
+      "states": {
+        "loading": "Centered spinner with a tactical 'Loading Projects...' label",
+        "empty": "Illustration of a music timeline + 'Upload MP3 to start' primary CTA",
+        "error": "Readable error text + Retry button"
+      },
+      "layout": "Standard vertical list layout. Each project card features a left-aligned video thumbnail, project title, and duration in Barlow Condensed. A floating action button (brandPrimary) sits at the bottom right for new projects. No glassmorphism used here."
+    },
+    {
+      "name": "Camera Studio",
+      "purpose": "The primary creation interface merging a full-bleed camera viewfinder with a top-anchored DAW waveform timeline to record synced clips over uploaded music.",
+      "states": {
+        "loading": "Full dark screen with a pulsing record icon",
+        "empty": "N/A - camera feed is always live",
+        "error": "Toast notification over the camera feed"
+      },
+      "layout": "Full-bleed background (simulated camera feed). CRITICAL: Apply top and bottom vertical gradient scrims to ensure text readability over the feed. Top area: A wide glass container holding the horizontal MP3 waveform, a vertical 'door' scrubber/playhead (brandPrimary), and overlaid clip segments (brandTertiary chips). Right edge: Vertical stack of glass pill icons (flip, flash, import). Bottom center: A massive Snapchat-style circular record button. Double-tapping a timeline clip opens a small glass contextual menu (Delete, Split, Revert)."
+    },
+    {
+      "name": "Preview and Export",
+      "purpose": "Playback of the compiled music video with timeline clips synced to the MP3, followed by a final export action.",
+      "states": {
+        "loading": "Spinner + 'Compiling video blocks...'",
+        "empty": "N/A",
+        "error": "Error modal + Retry Compilation button"
+      },
+      "layout": "Full-bleed video player. Minimal UI chrome to let the content shine. A sticky, full-width glass bottom sheet containing the 'Export Video' primary CTA."
+    }
+  ],
+  "images": {
+    "camera_viewfinder_mock": {
+      "url": "https://images.pexels.com/photos/7716280/pexels-photo-7716280.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Woman singing acting as the live camera viewfinder feed"
+    },
+    "project_thumb_1": {
+      "url": "https://images.unsplash.com/photo-1687586370886-b31f1c557df5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwzfHxtdXNpYyUyMHByb2R1Y2VyJTIwbGFwdG9wfGVufDB8fHx8MTc4MjI0MDUwMXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Music producer laptop and speakers"
+    },
+    "project_thumb_2": {
+      "url": "https://images.unsplash.com/photo-1687586370817-c0c31d87f11b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwyfHxtdXNpYyUyMHByb2R1Y2VyJTIwbGFwdG9wfGVufDB8fHx8MTc4MjI0MDUwMXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Music producer desk setup"
+    },
+    "project_thumb_3": {
+      "url": "https://images.unsplash.com/photo-1515846865653-cfda085cca48?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwxfHxtdXNpYyUyMHByb2R1Y2VyJTIwbGFwdG9wfGVufDB8fHx8MTc4MjI0MDUwMXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Macbook on black desk"
+    }
+  },
+  "haptics": {
+    "record_start": "impactMedium",
+    "record_stop": "impactLight",
+    "playhead_scrub": "selection",
+    "clip_double_tap": "impactLight",
+    "action_success": "notificationSuccess"
+  },
+  "instructions_to_main_agent": [
+    "Build the Camera Studio as a full-bleed absolute layout. Use 'camera_viewfinder_mock' as the flex:1 background to simulate the live feed.",
+    "CRITICAL: Insert top-to-bottom and bottom-to-top gradient scrims (transparent to ≥75% opacity dark) over the camera feed behind the top timeline and bottom record button. DO NOT render text directly on the image without it.",
+    "Top Timeline UI: Needs a horizontal scrollable view containing the waveform. Use a vertical scrubber line ('door') positioned absolutely to act as the playhead. Recorded clips should be absolute positioned 'chips' over the waveform track.",
+    "Snapchat-Style Record Button: Place it bottom center. Needs to be an oversized ring that fills/pulses when actively recording. Do not use standard buttons for this.",
+    "Double-Tap Menu: Wrap the timeline clips in GestureDetector or Pressable (with onDoublePress logic). Render a small glass contextual menu near it with 'Delete' and 'Revert'.",
+    "Strictly follow the Dark-First Utility palette. No blues, purples, or indigo hues anywhere. Use 'brandPrimary' (Signal Red) for all active recording and playhead indicators.",
+    "Typography: Use Barlow Condensed for timestamps, durations, and DAW metrics. Use DM Sans for UI text.",
+    "Wire all haptic feedback events (scrubbing, start/stop recording, tapping clips) according to the 'haptics' block."
+  ]
+}
