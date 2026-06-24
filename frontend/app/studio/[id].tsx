@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   Pressable,
+  ScrollView,
   ActivityIndicator,
   useWindowDimensions,
   Linking,
@@ -35,9 +36,12 @@ import TrimBar from "@/src/components/TrimBar";
 const FILTERS = [
   { key: "none", label: "None", tint: "transparent" },
   { key: "warm", label: "Warm", tint: "rgba(255,138,46,0.20)" },
-  { key: "vivid", label: "Vivid", tint: "rgba(255,59,74,0.18)" },
+  { key: "vivid", label: "Vivid", tint: "rgba(255,59,74,0.16)" },
   { key: "noir", label: "Noir", tint: "rgba(0,0,0,0.40)" },
-  { key: "fade", label: "Fade", tint: "rgba(240,240,242,0.16)" },
+  { key: "vcr", label: "VCR", tint: "rgba(70,200,150,0.16)" },
+  { key: "trippy", label: "Trippy", tint: "rgba(180,60,220,0.20)" },
+  { key: "negative", label: "Negative", tint: "rgba(120,120,255,0.18)" },
+  { key: "photoneg", label: "Photo Neg", tint: "rgba(210,210,210,0.22)" },
 ];
 
 export default function StudioScreen() {
@@ -112,6 +116,7 @@ function StudioInner({
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [menuClip, setMenuClip] = useState<Clip | null>(null);
   const [trimClip, setTrimClip] = useState<Clip | null>(null);
+  const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
@@ -156,7 +161,7 @@ function StudioInner({
     setIsRecording(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const video = await camRef.current?.recordAsync({ maxDuration: 120 });
+      const video = await camRef.current?.recordAsync({ maxDuration: 10 });
       if (video?.uri) {
         await uploadClip(video.uri, songStartRef.current, "camera");
       }
@@ -368,6 +373,12 @@ function StudioInner({
         </View>
       )}
 
+      {countdown > 0 && (
+        <View pointerEvents="none" style={styles.countdownOverlay} testID="countdown-overlay">
+          <Text style={styles.countdownNum}>{countdown}</Text>
+        </View>
+      )}
+
       {/* ===== Bottom controls ===== */}
       <View style={[styles.bottomArea, { paddingBottom: insets.bottom + spacing.md }]}>
         {trimClip ? (
@@ -401,8 +412,14 @@ function StudioInner({
         )}
 
         {/* Filter carousel */}
-        {!trimClip && <View style={styles.filterRow}>
-          {FILTERS.map((f, i) => (
+        {!trimClip && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterRow}
+            contentContainerStyle={styles.filterContent}
+          >
+            {FILTERS.map((f, i) => (
             <Pressable
               key={f.key}
               testID={`filter-${f.key}`}
@@ -425,13 +442,22 @@ function StudioInner({
               </Text>
             </Pressable>
           ))}
-        </View>}
+          </ScrollView>
+        )}
 
         <View style={styles.recordRow}>
-          <View style={styles.sideSlot} />
+          <View style={styles.transportCluster}>
+            <Pressable style={styles.transportBtn} onPress={rewind} testID="rewind-btn">
+              <Ionicons name="play-skip-back" size={20} color={colors.onSurface} />
+            </Pressable>
+            <Pressable style={styles.transportBtn} onPress={togglePlay} testID="playpause-btn">
+              <Ionicons name={playing ? "pause" : "play"} size={20} color={colors.onSurface} />
+            </Pressable>
+          </View>
           <Pressable
             testID="record-btn"
-            onPress={onRecordPress}
+            onPress={beginCountdownAndRecord}
+            disabled={countdown > 0}
             style={styles.recordOuter}
           >
             <View
@@ -442,21 +468,26 @@ function StudioInner({
             />
             {isRecording && <View style={styles.recordRing} />}
           </Pressable>
-          <View style={styles.sideSlot}>
+          <View style={[styles.transportCluster, { justifyContent: "flex-end" }]}>
             <Pressable
-              testID="next-preview-btn"
-              style={styles.nextBtn}
+              testID="export-btn"
+              style={styles.exportPill}
               onPress={() => {
                 player.pause();
                 router.push(`/preview/${project.id}`);
               }}
             >
-              <Ionicons name="checkmark" size={22} color={colors.onBrandPrimary} />
+              <Ionicons name="share-outline" size={16} color={colors.onBrandPrimary} />
+              <Text style={styles.exportPillTxt}>Export</Text>
             </Pressable>
           </View>
         </View>
         <Text style={styles.hint}>
-          {isRecording ? "Recording — tap to punch out" : "Tap to punch in a clip"}
+          {countdown > 0
+            ? `Get ready… ${countdown}`
+            : isRecording
+            ? "● REC — max 10s · tap to stop"
+            : "Tap ● to punch in a clip (≤10s)"}
         </Text>
       </View>
 
@@ -590,8 +621,10 @@ const styles = StyleSheet.create({
   uploadText: { color: colors.onSurface, fontFamily: font.bodyMed, fontSize: 13 },
 
   bottomArea: { position: "absolute", bottom: 0, left: 0, right: 0, paddingHorizontal: spacing.lg },
-  filterRow: { flexDirection: "row", justifyContent: "center", gap: spacing.sm, marginBottom: spacing.lg },
+  filterRow: { marginBottom: spacing.lg },
+  filterContent: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: spacing.xs, alignItems: "center" },
   filterChip: {
+    flexShrink: 0,
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderRadius: radius.pill,
@@ -604,6 +637,40 @@ const styles = StyleSheet.create({
   filterTextActive: { color: colors.onSurfaceInverse, fontFamily: font.bodyBold },
 
   recordRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  transportCluster: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  transportBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(26,28,35,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  exportPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.success,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+  },
+  exportPillTxt: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 13 },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.25)",
+  },
+  countdownNum: {
+    color: colors.brandPrimary,
+    fontFamily: font.display,
+    fontSize: 160,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowRadius: 20,
+  },
   sideSlot: { width: 64, alignItems: "center", justifyContent: "center" },
   recordOuter: {
     width: 84,

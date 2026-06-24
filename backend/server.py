@@ -49,6 +49,18 @@ def now_iso() -> str:
 
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
+# Per-clip visual effects, baked into the compiled output via ffmpeg.
+FILTER_FX = {
+    "none": "",
+    "warm": "eq=gamma_r=1.08:gamma_b=0.92:saturation=1.1",
+    "vivid": "eq=saturation=1.5:contrast=1.08",
+    "noir": "hue=s=0,eq=contrast=1.2",
+    "vcr": "noise=alls=16:allf=t,eq=saturation=1.35:contrast=1.05,unsharp=5:5:1.0",
+    "trippy": "hue=H=2*PI*t:s=1.5",
+    "negative": "negate",
+    "photoneg": "negate,hue=s=0",
+}
+
 
 def media_duration(path: Path) -> float:
     """Return media duration in seconds by parsing ffmpeg output (0.0 on failure)."""
@@ -167,10 +179,21 @@ async def add_clip(
         shutil.copyfileobj(video.file, f)
     duration = media_duration(dest)
 
+    # Clips are crammed back-to-back: each new clip starts right where the
+    # previous one ended (cumulative effective duration). No gaps.
+    def _eff(c):
+        full = c.get("duration", 0) or 0
+        t0 = c.get("trim_start", 0) or 0
+        t1 = c.get("trim_end", 0) or 0
+        t1 = t1 if (t1 and t1 > 0) else full
+        return max(t1 - t0, 0)
+
+    cumulative = sum(_eff(c) for c in doc.get("clips", []))
+
     clip = Clip(
         filename=filename,
         url=public_url("clips", filename),
-        song_start=song_start,
+        song_start=cumulative,
         duration=duration,
         source=source,
         filter=filter,
@@ -253,49 +276,48 @@ async def compile_project(project_id: str):
                 {"id": project_id}, {"$set": {"audio_duration": total}})
     total = max(total, 0.5)
 
-    clips = sorted(project.clips, key=lambda c: c.song_start)
+    clips = sorted(project.clips, key=lambda c: c.created_at)
 
     W, H, FPS = 720, 1280, 30
-    inputs = ["-f", "lavfi", "-i", f"color=c=black:s={W}x{H}:r={FPS}:d={total:.3f}"]
+    inputs = []
     for c in clips:
         inputs += ["-i", str(CLIP_DIR / c.filename)]
 
-    filters = []
-    last = "0:v"  # black base
-    for idx, c in enumerate(clips, start=1):
-        start = max(c.song_start, 0.0)
+    segs = []
+    labels = []
+    for idx, c in enumerate(clips):
         full = c.duration if c.duration > 0 else (media_duration(CLIP_DIR / c.filename) or 2.0)
         ts = max(c.trim_start, 0.0)
         te = c.trim_end if (c.trim_end and c.trim_end > 0) else full
         te = min(te, full)
         if te <= ts:
             ts, te = 0.0, full
-        eff = max(te - ts, 0.2)
-        end = min(start + eff, total)
-        filters.append(
+        te = min(te, ts + 10.0)  # enforce 10s max per clip
+        fx = FILTER_FX.get(c.filter, "")
+        chain = (
             f"[{idx}:v]trim=start={ts:.3f}:end={te:.3f},setpts=PTS-STARTPTS,"
             f"scale={W}:{H}:force_original_aspect_ratio=increase,"
-            f"crop={W}:{H},setsar=1,fps={FPS},format=yuv420p,"
-            f"tpad=start_duration={start:.3f}:start_mode=clone,"
-            f"setpts=PTS-STARTPTS[v{idx}]"
+            f"crop={W}:{H},setsar=1,fps={FPS},format=yuv420p"
         )
-        out = f"o{idx}"
-        filters.append(
-            f"[{last}][v{idx}]overlay=enable='between(t,{start:.3f},{end:.3f})':"
-            f"shortest=0[{out}]"
-        )
-        last = out
+        if fx:
+            chain += "," + fx
+        chain += f"[v{idx}]"
+        segs.append(chain)
+        labels.append(f"[v{idx}]")
 
-    filter_complex = ";".join(filters)
+    concat = "".join(labels) + f"concat=n={len(clips)}:v=1:a=0[vout]"
+    filter_complex = ";".join(segs + [concat])
     out_name = f"{project.id}.mp4"
     out_path = OUTPUT_DIR / out_name
 
+    # Video = clips crammed back-to-back (no gaps); audio = the song from 0,
+    # trimmed to the video length via -shortest.
     cmd = [FFMPEG, "-y", *inputs, "-i", str(audio_path),
            "-filter_complex", filter_complex,
-           "-map", f"[{last}]", "-map", f"{len(clips)+1}:a",
+           "-map", "[vout]", "-map", f"{len(clips)}:a",
            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k",
-           "-t", f"{total:.3f}", "-movflags", "+faststart", str(out_path)]
+           "-shortest", "-movflags", "+faststart", str(out_path)]
 
     logger.info("Compiling project %s with %d clips", project.id, len(clips))
     try:
