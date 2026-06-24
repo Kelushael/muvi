@@ -43,3 +43,10 @@ User detail: Upload MP3s (the beat, with a DAW-style waveform below). Punch in c
 ## Next Tasks
 - Confirm device test of record/import flow with the user.
 - Then tackle P1 filter-bake + YouTube/secure delivery once credentials/OAuth provided.
+
+## Update (2026-06-24)
+- [x] Fixed studio/[id].tsx compile blocker (missing openBpm/saveBpm/rewind fns, dup prop, corrupted trailing styles). App bundles again.
+- [x] "Bounce to MUVI" export: backend `POST /api/projects/{id}/export-vps` relays the compiled MP4 to the user's own server (markyninox.com). Endpoint URL+key in backend/.env (VPS_UPLOAD_URL, VPS_UPLOAD_KEY) — key stays server-side, never in app bundle. Preview screen has a "Bounce to MUVI" button.
+- [x] MUVI web gallery: `GET /api/gallery` renders a public dark-themed showcase of all compiled videos ("what renders at the web URL").
+- [x] Self-host deploy package in /app/deploy/: Dockerfile.backend, docker-compose.yml (backend + mongo + media volume), README.md (run on VPS + point EXPO_PUBLIC_BACKEND_URL at it + Nginx/HTTPS), and upload.php (drop-in relay endpoint matching the backend contract: file field `file`, header `X-Upload-Key`, returns JSON url).
+- NOTE: export-vps currently 502s until the user deploys upload.php to markyninox.com and DNS points to 2.25.147.209. Frontend shows a friendly "make sure your endpoint is live" alert on failure.

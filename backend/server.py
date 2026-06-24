@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, UploadFile, File, Form, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -469,6 +469,93 @@ async def ai_chat(req: ChatRequest):
     except Exception as e:
         logger.error("AI chat failed: %s", e)
         raise HTTPException(500, f"AI error: {str(e)[:200]}")
+
+
+VPS_UPLOAD_URL = os.environ.get("VPS_UPLOAD_URL", "")
+VPS_UPLOAD_KEY = os.environ.get("VPS_UPLOAD_KEY", "")
+
+
+@api_router.post("/projects/{project_id}/export-vps")
+async def export_to_vps(project_id: str):
+    """Relay the compiled MUVI to the user's own server (markyninox.com).
+    Keeps the upload key on the backend, never in the app bundle."""
+    if not VPS_UPLOAD_URL:
+        raise HTTPException(500, "VPS upload endpoint not configured")
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    project = Project(**clean_project(doc))
+    out_path = OUTPUT_DIR / f"{project.id}.mp4"
+    if not project.output_url or not out_path.exists():
+        raise HTTPException(400, "Compile the video before bouncing to MUVI")
+
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", project.title or "muvi").strip("-") or "muvi"
+    remote_name = f"MUVI-{slug}-{project.id[:8]}.mp4"
+    try:
+        async with httpx.AsyncClient(timeout=300) as hc:
+            with out_path.open("rb") as fh:
+                resp = await hc.post(
+                    VPS_UPLOAD_URL,
+                    files={"file": (remote_name, fh, "video/mp4")},
+                    headers={"X-Upload-Key": VPS_UPLOAD_KEY},
+                )
+        resp.raise_for_status()
+        link = None
+        try:
+            link = resp.json().get("url")
+        except Exception:
+            link = None
+        return {"ok": True, "filename": remote_name, "url": link}
+    except httpx.HTTPStatusError as e:
+        logger.error("VPS upload rejected: %s", e.response.status_code)
+        raise HTTPException(502, f"Server rejected upload ({e.response.status_code})")
+    except Exception as e:
+        logger.error("VPS upload failed: %s", e)
+        raise HTTPException(502, f"Upload failed: {type(e).__name__}: {str(e)[:140]}")
+
+
+@api_router.get("/gallery", response_class=HTMLResponse)
+async def gallery():
+    """A public MUVI showcase — this is what renders at the web URL."""
+    docs = await db.projects.find({"output_url": {"$ne": None}}).sort("updated_at", -1).to_list(200)
+    cards = ""
+    for d in docs:
+        title = (d.get("title") or "Untitled").replace("<", "&lt;").replace(">", "&gt;")
+        url = d.get("output_url") or ""
+        dur = d.get("audio_duration") or 0
+        clips = len(d.get("clips", []))
+        cards += (
+            f'<div class="card"><video controls preload="metadata" playsinline src="{url}"></video>'
+            f'<div class="meta"><h3>{title}</h3>'
+            f'<span>{clips} clip{"s" if clips != 1 else ""} &middot; {int(dur // 60)}:{int(dur % 60):02d}</span>'
+            f"</div></div>"
+        )
+    if not cards:
+        cards = '<p class="empty">No MUVIs bounced yet. Go shoot one. 🎬</p>'
+    html = f"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>MUVI — markyninox</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0b0c10;color:#f4f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100vh}}
+header{{padding:48px 24px 24px;text-align:center;background:radial-gradient(120% 140% at 50% 0%,rgba(255,59,74,0.18),transparent 60%)}}
+.logo{{font-size:64px;font-weight:900;letter-spacing:6px;background:linear-gradient(90deg,#ff3b4a,#ff7a84);-webkit-background-clip:text;background-clip:text;color:transparent}}
+.tag{{margin-top:8px;color:#8b8e98;letter-spacing:3px;font-size:13px;text-transform:uppercase}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px;padding:24px;max-width:1200px;margin:0 auto}}
+.card{{background:#16181f;border:1px solid rgba(255,255,255,0.07);border-radius:16px;overflow:hidden;transition:transform .15s}}
+.card:hover{{transform:translateY(-4px)}}
+.card video{{width:100%;aspect-ratio:9/16;object-fit:cover;background:#000;display:block}}
+.meta{{padding:14px 16px}}
+.meta h3{{font-size:17px;font-weight:700}}
+.meta span{{color:#8b8e98;font-size:13px}}
+.empty{{text-align:center;color:#8b8e98;padding:80px 24px;font-size:18px}}
+footer{{text-align:center;color:#5a5d66;padding:32px;font-size:12px;letter-spacing:1px}}
+</style></head><body>
+<header><div class="logo">MUVI</div><div class="tag">made with beatcam studio</div></header>
+<div class="grid">{cards}</div>
+<footer>POWERED BY MARKYNINOX</footer>
+</body></html>"""
+    return HTMLResponse(html)
 
 
 app.include_router(api_router)

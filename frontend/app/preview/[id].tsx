@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Share,
   Linking,
+  Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -28,6 +29,7 @@ export default function PreviewScreen() {
   const [compiling, setCompiling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
+  const [bouncing, setBouncing] = useState(false);
 
   const player = useVideoPlayer(null, (p) => {
     p.loop = false;
@@ -89,6 +91,35 @@ export default function PreviewScreen() {
 
   const onOpen = () => {
     if (outputUrl) Linking.openURL(fullUrl(outputUrl));
+  };
+
+  const onBounce = async () => {
+    if (!outputUrl || bouncing) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setBouncing(true);
+    try {
+      const res = await api.exportVps(id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert(
+        "Bounced to MUVI ☁️",
+        res.url ? `Live at:\n${res.url}` : `Uploaded as ${res.filename}`,
+        res.url
+          ? [
+              { text: "Open", onPress: () => Linking.openURL(res.url as string) },
+              { text: "Share", onPress: () => Share.share({ message: res.url as string }) },
+              { text: "Done", style: "cancel" },
+            ]
+          : [{ text: "OK" }],
+      );
+    } catch {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert(
+        "Bounce failed",
+        "Couldn't reach your MUVI server. Make sure the upload endpoint is live on markyninox.com.",
+      );
+    } finally {
+      setBouncing(false);
+    }
   };
 
   return (
@@ -174,6 +205,21 @@ export default function PreviewScreen() {
           <Ionicons name="share-social" size={20} color={colors.onBrandPrimary} />
           <Text style={styles.exportText}>Export & Share Video</Text>
         </Pressable>
+        <Pressable
+          style={[styles.muviBtn, (!outputUrl || bouncing) && styles.disabled]}
+          onPress={onBounce}
+          disabled={!outputUrl || bouncing}
+          testID="bounce-muvi-btn"
+        >
+          {bouncing ? (
+            <ActivityIndicator color={colors.onSurface} size="small" />
+          ) : (
+            <Ionicons name="cloud-upload-outline" size={20} color={colors.onSurface} />
+          )}
+          <Text style={styles.muviText}>
+            {bouncing ? "Bouncing to MUVI…" : "Bounce to MUVI"}
+          </Text>
+        </Pressable>
       </BlurView>
     </View>
   );
@@ -252,5 +298,17 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
   },
   exportText: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 16 },
+  muviBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    backgroundColor: "rgba(39,42,53,0.8)",
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  muviText: { color: colors.onSurface, fontFamily: font.bodyBold, fontSize: 15, letterSpacing: 0.5 },
   disabled: { opacity: 0.4 },
 });

@@ -1,0 +1,30 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    # not exposed publicly; backend talks to it over the internal network
+
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "beatcam"
+      EMERGENT_LLM_KEY: "${EMERGENT_LLM_KEY}"
+      # Optional: leave blank if you don't relay exports anywhere
+      VPS_UPLOAD_URL: "${VPS_UPLOAD_URL:-}"
+      VPS_UPLOAD_KEY: "${VPS_UPLOAD_KEY:-}"
+    ports:
+      - "8001:8001"
+    volumes:
+      - media_data:/app/backend/media
+
+volumes:
+  mongo_data:
+  media_data:

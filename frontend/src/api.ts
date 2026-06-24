@@ -102,6 +102,11 @@ export const api = {
   compile: (id: string): Promise<Project> =>
     fetch(`${BASE}/api/projects/${id}/compile`, { method: "POST" }).then(asJson),
 
+  exportVps: (
+    id: string,
+  ): Promise<{ ok: boolean; filename: string; url: string | null }> =>
+    fetch(`${BASE}/api/projects/${id}/export-vps`, { method: "POST" }).then(asJson),
+
   updateProject: (
     id: string,
     body: { title?: string; bpm?: number; snap?: boolean },
