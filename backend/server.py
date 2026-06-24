@@ -517,6 +517,10 @@ async def export_to_vps(project_id: str):
 @api_router.get("/gallery", response_class=HTMLResponse)
 async def gallery():
     """A public MUVI showcase — this is what renders at the web URL."""
+    return HTMLResponse(await render_gallery_html())
+
+
+async def render_gallery_html() -> str:
     docs = await db.projects.find({"output_url": {"$ne": None}}).sort("updated_at", -1).to_list(200)
     cards = ""
     for d in docs:
@@ -555,10 +559,16 @@ footer{{text-align:center;color:#5a5d66;padding:32px;font-size:12px;letter-spaci
 <div class="grid">{cards}</div>
 <footer>POWERED BY MARKYNINOX</footer>
 </body></html>"""
-    return HTMLResponse(html)
+    return html
 
 
 app.include_router(api_router)
+
+
+@app.get("/", response_class=HTMLResponse)
+async def web_root():
+    """markyninox.com root → the public MUVI showcase."""
+    return HTMLResponse(await render_gallery_html())
 
 app.add_middleware(
     CORSMiddleware,

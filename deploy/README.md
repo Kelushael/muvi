@@ -49,9 +49,10 @@ Rebuild the app (Emergent Publish → build). Every API call now hits your serve
 
 ## C. The MUVI web gallery
 
-Once the backend is live, visiting **https://markyninox.com/api/gallery**
-renders a public showcase of every compiled music video. Map your root domain
-to it in Nginx if you want `markyninox.com` itself to show the gallery.
+Once the backend is live, **markyninox.com itself** (the root) renders a public
+showcase of every compiled music video — the backend serves the gallery at `/`
+(and also at `/api/gallery`). No extra Nginx remap needed; just proxy `/` to the
+backend as shown above.
 
 ---
 
