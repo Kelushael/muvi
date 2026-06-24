@@ -447,9 +447,32 @@ async def ai_chat(req: ChatRequest):
                 data = r.json()
             return {"reply": data["choices"][0]["message"]["content"]}
 
-        # Built-in: Emergent Universal Key -> Claude Sonnet 4.6
+        # Built-in (preferred when no Emergent key): Ollama Cloud, OpenAI-compatible.
+        emergent_key = os.environ.get("EMERGENT_LLM_KEY")
+        ollama_key = os.environ.get("OLLAMA_API_KEY")
+        ollama_base = os.environ.get("OLLAMA_BASE_URL")   # e.g. https://ollama.com/v1
+        ollama_model = os.environ.get("OLLAMA_MODEL")     # e.g. ministral-3:3b
+        if (not emergent_key) and ollama_key and ollama_base and ollama_model:
+            url = ollama_base.rstrip("/") + "/chat/completions"
+            payload = {
+                "model": ollama_model,
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
+                + [{"role": m.role, "content": m.content} for m in req.messages],
+                "temperature": 0.7,
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {ollama_key}",
+            }
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(url, json=payload, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+            return {"reply": data["choices"][0]["message"]["content"]}
+
+        # Fallback: Emergent Universal Key -> Claude Sonnet 4.6
         from emergentintegrations.llm.chat import LlmChat, UserMessage
-        key = os.environ.get("EMERGENT_LLM_KEY")
+        key = emergent_key
         chat = LlmChat(
             api_key=key,
             session_id=str(uuid.uuid4()),
