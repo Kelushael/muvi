@@ -234,6 +234,33 @@ function StudioInner({
     } catch {}
   };
 
+  const rewind = () => {
+    Haptics.selectionAsync();
+    player.pause();
+    player.seekTo(0);
+    lastPosRef.current = 0;
+  };
+
+  const openBpm = () => {
+    Haptics.selectionAsync();
+    setBpmDraft(project.bpm ? String(Math.round(project.bpm)) : "");
+    setSnapDraft(project.snap ?? true);
+    setShowBpm(true);
+  };
+
+  const saveBpm = async () => {
+    const bpmVal = parseFloat(bpmDraft);
+    try {
+      const updated = await api.updateProject(project.id, {
+        bpm: isNaN(bpmVal) ? 0 : bpmVal,
+        snap: snapDraft,
+      });
+      setProject(updated);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch {}
+    setShowBpm(false);
+  };
+
   // ---- Permission gate ----
   const camGranted = camPerm?.granted;
   const micGranted = micPerm?.granted;
@@ -444,7 +471,6 @@ function StudioInner({
             position={position}
             clips={project.clips}
             selectedClipId={selectedClip?.id ?? null}
-            bpm={project.bpm}
             onSeek={seek}
             onSelectClip={(c) => {
               setSelectedClip(c);
@@ -863,11 +889,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     borderRadius: radius.pill,
-    marginTop: spacing.sm,
-  },
-  primaryCtaText: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 15 },
-});
-orderRadius: radius.pill,
     marginTop: spacing.sm,
   },
   primaryCtaText: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 15 },
