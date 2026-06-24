@@ -115,6 +115,7 @@ function StudioInner({
   const [isRecording, setIsRecording] = useState(false);
   const recordingRef = useRef(false);
   const songStartRef = useRef(0);
+  const lastPosRef = useRef(0);
   const [uploading, setUploading] = useState(false);
   const [selectedClip, setSelectedClip] = useState<Clip | null>(null);
   const [menuClip, setMenuClip] = useState<Clip | null>(null);
@@ -161,8 +162,9 @@ function StudioInner({
 
   const startRec = async () => {
     if (recordingRef.current) return;
-    if (!playing) player.play();
-    songStartRef.current = position;
+    player.seekTo(lastPosRef.current);
+    player.play();
+    songStartRef.current = lastPosRef.current;
     recordingRef.current = true;
     setIsRecording(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -183,7 +185,8 @@ function StudioInner({
     if (!recordingRef.current) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     camRef.current?.stopRecording();
-    // Music keeps playing — only the recording stops (punch-out).
+    player.pause();
+    lastPosRef.current = position; // lock — next take resumes here
   };
 
   const onRecordPress = () => (isRecording ? stopRec() : startRec());
@@ -330,6 +333,37 @@ function StudioInner({
           </Pressable>
         </View>
 
+        {project.clips.length > 0 && (
+          <View style={styles.segBar} testID="segment-bar">
+            {[...project.clips]
+              .sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
+              .map((c) => {
+                const eff =
+                  (c.trim_end && c.trim_end > 0 ? c.trim_end : c.duration) -
+                  (c.trim_start || 0);
+                const w = Math.max((eff / (duration || 1)) * 100, 2);
+                return (
+                  <Pressable
+                    key={c.id}
+                    testID={`seg-${c.id}`}
+                    onPress={() => {
+                      setSelectedClip(c);
+                      setTrimClip(c);
+                    }}
+                    style={[
+                      styles.seg,
+                      {
+                        width: `${Math.min(w, 100)}%`,
+                        backgroundColor:
+                          selectedClip?.id === c.id ? colors.warning : colors.brandPrimary,
+                      },
+                    ]}
+                  />
+                );
+              })}
+          </View>
+        )}
+
         <BlurView intensity={30} tint="dark" style={styles.timelineGlass}>
           <View style={styles.timelineHeaderRow}>
             <Pressable onPress={togglePlay} style={styles.playBtn} testID="play-toggle">
@@ -382,12 +416,6 @@ function StudioInner({
         <View style={styles.uploadBadge} testID="uploading-badge">
           <ActivityIndicator color={colors.onBrandPrimary} size="small" />
           <Text style={styles.uploadText}>Saving clip…</Text>
-        </View>
-      )}
-
-      {countdown > 0 && (
-        <View pointerEvents="none" style={styles.countdownOverlay} testID="countdown-overlay">
-          <Text style={styles.countdownNum}>{countdown}</Text>
         </View>
       )}
 
@@ -470,8 +498,8 @@ function StudioInner({
           </View>
           <Pressable
             testID="record-btn"
-            onPress={beginCountdownAndRecord}
-            disabled={countdown > 0}
+            onPressIn={startRec}
+            onPressOut={stopRec}
             style={styles.recordOuter}
           >
             <View
@@ -611,6 +639,8 @@ const styles = StyleSheet.create({
 
   topArea: { paddingHorizontal: spacing.lg },
   topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  segBar: { flexDirection: "row", gap: 2, height: 5, marginBottom: spacing.sm },
+  seg: { height: 5, borderRadius: 3 },
   iconBtn: {
     width: 38,
     height: 38,
@@ -833,6 +863,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     borderRadius: radius.pill,
+    marginTop: spacing.sm,
+  },
+  primaryCtaText: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 15 },
+});
+orderRadius: radius.pill,
     marginTop: spacing.sm,
   },
   primaryCtaText: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 15 },
