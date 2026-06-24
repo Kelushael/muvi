@@ -19,6 +19,8 @@ export type Project = {
   audio_filename: string;
   audio_url: string;
   audio_duration: number;
+  bpm: number;
+  snap: boolean;
   clips: Clip[];
   output_url: string | null;
   created_at: string;
@@ -99,6 +101,29 @@ export const api = {
 
   compile: (id: string): Promise<Project> =>
     fetch(`${BASE}/api/projects/${id}/compile`, { method: "POST" }).then(asJson),
+
+  updateProject: (
+    id: string,
+    body: { title?: string; bpm?: number; snap?: boolean },
+  ): Promise<Project> =>
+    fetch(`${BASE}/api/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(asJson),
+
+  aiChat: (body: {
+    messages: { role: string; content: string }[];
+    mode: string;
+    base_url?: string;
+    api_key?: string;
+    model?: string;
+  }): Promise<{ reply: string }> =>
+    fetch(`${BASE}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(asJson),
 
   remove: (id: string): Promise<{ ok: boolean }> =>
     fetch(`${BASE}/api/projects/${id}`, { method: "DELETE" }).then(asJson),

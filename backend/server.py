@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import json
 import asyncio
+import httpx
 import imageio_ffmpeg
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -107,6 +108,8 @@ class Project(BaseModel):
     audio_filename: str
     audio_url: str
     audio_duration: float = 0.0
+    bpm: float = 0.0
+    snap: bool = True
     clips: List[Clip] = []
     output_url: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
@@ -130,6 +133,32 @@ async def get_project(project_id: str):
     doc = await db.projects.find_one({"id": project_id})
     if not doc:
         raise HTTPException(404, "Project not found")
+    return Project(**clean_project(doc))
+
+
+class ProjectUpdate(BaseModel):
+    title: Optional[str] = None
+    bpm: Optional[float] = None
+    snap: Optional[bool] = None
+
+
+@api_router.patch("/projects/{project_id}", response_model=Project)
+async def update_project(project_id: str, body: ProjectUpdate):
+    doc = await db.projects.find_one({"id": project_id})
+    if not doc:
+        raise HTTPException(404, "Project not found")
+    sets = {}
+    if body.title is not None:
+        sets["title"] = body.title
+    if body.bpm is not None:
+        sets["bpm"] = max(body.bpm, 0.0)
+    if body.snap is not None:
+        sets["snap"] = body.snap
+    if sets:
+        sets["updated_at"] = now_iso()
+        sets["output_url"] = None
+        await db.projects.update_one({"id": project_id}, {"$set": sets})
+        doc = await db.projects.find_one({"id": project_id})
     return Project(**clean_project(doc))
 
 
@@ -293,6 +322,16 @@ async def compile_project(project_id: str):
         if te <= ts:
             ts, te = 0.0, full
         te = min(te, ts + 10.0)  # enforce 10s max per clip
+        # Snap the cut to the nearest beat (BPM grid) so edits land on the downbeat.
+        if project.bpm and project.bpm > 0 and project.snap:
+            beat = 60.0 / project.bpm
+            eff = te - ts
+            snapped = round(eff / beat) * beat
+            if snapped < beat:
+                snapped = beat
+            te = ts + min(snapped, full - ts, 10.0)
+            if te <= ts:
+                te = min(ts + beat, full)
         fx = FILTER_FX.get(c.filter, "")
         chain = (
             f"[{idx}:v]trim=start={ts:.3f}:end={te:.3f},setpts=PTS-STARTPTS,"
@@ -348,6 +387,88 @@ async def serve_media(kind: str, filename: str):
     if not fp.exists():
         raise HTTPException(404, "File not found")
     return FileResponse(str(fp))
+
+
+SYSTEM_PROMPT = """You are BeatCam Coach, the built-in AI guide inside BeatCam Studio — a mobile app for filming music videos to an uploaded song and bouncing them out.
+
+HOW THE APP WORKS (so you can guide users precisely):
+- A project = one uploaded MP3/audio track. A DAW-style waveform timeline shows the song; a draggable playhead ("door") scrubs it.
+- Filming: a transport bar has Rewind, Play/Pause, Record, and Export. The song plays continuously. Tapping Record (after a 3-2-1 countdown) punches IN a clip; tapping again punches OUT — the music keeps playing. Clips are capped at 10 seconds each.
+- Clips cram together back-to-back with NO gaps: each new clip starts where the last ended. The Export/compile concatenates them under the song into one MP4.
+- Gallery import drops existing video in as B-roll (with the current filter).
+- A bottom filmstrip timeline shows each clip; tap a clip to trim it with yellow handles (in/out). Trims and filters are baked into the export.
+- Filters (baked at compile): None, Warm, Vivid, Noir, VCR, Trippy, Negative, Photo Neg.
+- BPM + Snap: a project can have a BPM. When Snap is on, every clip's cut length is snapped to the nearest beat so cuts land on the grid.
+
+EDITING MATH YOU KNOW COLD:
+- Seconds per beat = 60 / BPM. Example: 120 BPM -> 0.5s/beat.
+- One bar in 4/4 = 4 beats = 240 / BPM seconds (120 BPM -> 2.0s/bar). The downbeat repeats every bar.
+- A good cut/transition map puts cuts on beats (or every 1/2 or 1 bar). For punchy edits, cut every 2 beats; for cinematic, every 1-2 bars.
+- To fit B-roll between clips: size each B-roll insert to a whole number of beats (e.g., 2 or 4 beats) so it lands on the next downbeat.
+- Snap-to-grid keeps every cut beat-accurate: round each clip length to the nearest multiple of 60/BPM.
+
+YOUR JOB: Watch what the user is trying to do and speed it up — suggest BPM-based cut maps, transition timing, where to drop B-roll, which filter fits the vibe, and exact second values using the math above. Be concise, concrete, and give real numbers. If they tell you the BPM and how many clips, lay out a beat-by-beat cut plan."""
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: List[ChatMessage]
+    mode: str = "builtin"          # builtin | custom
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+@api_router.post("/ai/chat")
+async def ai_chat(req: ChatRequest):
+    if not req.messages:
+        raise HTTPException(400, "No messages")
+    try:
+        if req.mode == "custom":
+            if not req.base_url or not req.model:
+                raise HTTPException(400, "Custom mode needs base_url and model")
+            url = req.base_url.rstrip("/") + "/chat/completions"
+            payload = {
+                "model": req.model,
+                "messages": [{"role": "system", "content": SYSTEM_PROMPT}]
+                + [{"role": m.role, "content": m.content} for m in req.messages],
+                "temperature": 0.7,
+            }
+            headers = {"Content-Type": "application/json"}
+            if req.api_key:
+                headers["Authorization"] = f"Bearer {req.api_key}"
+            async with httpx.AsyncClient(timeout=120) as client:
+                r = await client.post(url, json=payload, headers=headers)
+                r.raise_for_status()
+                data = r.json()
+            return {"reply": data["choices"][0]["message"]["content"]}
+
+        # Built-in: Emergent Universal Key -> Claude Sonnet 4.6
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        key = os.environ.get("EMERGENT_LLM_KEY")
+        chat = LlmChat(
+            api_key=key,
+            session_id=str(uuid.uuid4()),
+            system_message=SYSTEM_PROMPT,
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        history = req.messages[:-1]
+        last = req.messages[-1]
+        if history:
+            ctx = "\n".join(f"{m.role.upper()}: {m.content}" for m in history[-8:])
+            text = f"[Conversation so far]\n{ctx}\n\n[New message]\n{last.content}"
+        else:
+            text = last.content
+        reply = await chat.send_message(UserMessage(text=text))
+        return {"reply": reply}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("AI chat failed: %s", e)
+        raise HTTPException(500, f"AI error: {str(e)[:200]}")
 
 
 app.include_router(api_router)

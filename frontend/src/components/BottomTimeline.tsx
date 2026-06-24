@@ -15,6 +15,7 @@ type Props = {
   position: number;
   clips: Clip[];
   selectedClipId: string | null;
+  bpm?: number;
   onSeek: (sec: number) => void;
   onSelectClip: (clip: Clip) => void;
 };
@@ -30,6 +31,7 @@ export default function BottomTimeline({
   position,
   clips,
   selectedClipId,
+  bpm,
   onSeek,
   onSelectClip,
 }: Props) {
@@ -52,6 +54,20 @@ export default function BottomTimeline({
           {Array.from({ length: TICKS + 1 }).map((_, i) => (
             <View key={i} style={[styles.tick, { left: (i / TICKS) * width }]} />
           ))}
+          {bpm && bpm > 0 && safeDur > 0
+            ? Array.from({
+                length: Math.min(Math.floor(safeDur / (60 / bpm)) + 1, 240),
+              }).map((_, i) => {
+                const x = ((i * (60 / bpm)) / safeDur) * width;
+                const bar = i % 4 === 0;
+                return (
+                  <View
+                    key={`b${i}`}
+                    style={[styles.beatTick, { left: x, opacity: bar ? 0.55 : 0.22 }]}
+                  />
+                );
+              })
+            : null}
           {clips.map((c, idx) => {
             const left = Math.min((c.song_start / safeDur) * width, width - 10);
             const w = Math.max((effDur(c) / safeDur) * width, 14);
@@ -110,6 +126,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: 1,
     backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  beatTick: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: colors.brandSecondary,
   },
   block: {
     position: "absolute",

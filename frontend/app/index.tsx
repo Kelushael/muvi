@@ -146,9 +146,10 @@ export default function ProjectsScreen() {
           <Text style={styles.brandSub}>BEATCAM</Text>
           <Text style={styles.brandTitle}>STUDIO</Text>
         </View>
-        <View style={styles.logoBadge}>
-          <Ionicons name="recording-outline" size={20} color={colors.brandPrimary} />
-        </View>
+        <Pressable style={styles.aiBtn} onPress={() => router.push("/ai")} testID="ai-help-btn">
+          <Ionicons name="sparkles" size={16} color={colors.brandPrimary} />
+          <Text style={styles.aiBtnTxt}>AI Help</Text>
+        </Pressable>
       </View>
 
       {loading ? (
@@ -278,6 +279,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  aiBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    height: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor: colors.brandTertiary,
+  },
+  aiBtnTxt: { color: colors.onSurface, fontFamily: font.bodyBold, fontSize: 13 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, padding: spacing.xl },
   dimText: { color: colors.info, fontFamily: font.body, fontSize: 14, textAlign: "center" },
   emptyTitle: { color: colors.onSurface, fontFamily: font.display, fontSize: 24, letterSpacing: 1 },

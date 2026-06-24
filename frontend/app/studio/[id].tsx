@@ -5,6 +5,9 @@ import {
   StyleSheet,
   Pressable,
   ScrollView,
+  Modal,
+  TextInput,
+  Switch,
   ActivityIndicator,
   useWindowDimensions,
   Linking,
@@ -117,6 +120,9 @@ function StudioInner({
   const [menuClip, setMenuClip] = useState<Clip | null>(null);
   const [trimClip, setTrimClip] = useState<Clip | null>(null);
   const [countdown, setCountdown] = useState(0);
+  const [showBpm, setShowBpm] = useState(false);
+  const [bpmDraft, setBpmDraft] = useState("");
+  const [snapDraft, setSnapDraft] = useState(true);
 
   useEffect(() => {
     setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
@@ -337,6 +343,12 @@ function StudioInner({
               {fmtTime(position)} <Text style={styles.timeDim}>/ {fmtTime(duration)}</Text>
             </Text>
             <View style={{ flex: 1 }} />
+            <Pressable style={styles.bpmPill} onPress={openBpm} testID="bpm-pill">
+              <Ionicons name="speedometer-outline" size={13} color={colors.brandSecondary} />
+              <Text style={styles.bpmTxt}>
+                {project.bpm ? `${Math.round(project.bpm)} BPM` : "SET BPM"}
+              </Text>
+            </Pressable>
             <Text style={styles.clipCount}>{project.clips.length} CLIPS</Text>
           </View>
           <Waveform
@@ -400,9 +412,11 @@ function StudioInner({
           <BottomTimeline
             width={timelineW}
             duration={duration}
+            bpm={project.bpm}
             position={position}
             clips={project.clips}
             selectedClipId={selectedClip?.id ?? null}
+            bpm={project.bpm}
             onSeek={seek}
             onSelectClip={(c) => {
               setSelectedClip(c);
@@ -521,6 +535,39 @@ function StudioInner({
           </BlurView>
         </Pressable>
       )}
+
+      <Modal visible={showBpm} transparent animationType="fade" onRequestClose={() => setShowBpm(false)}>
+        <Pressable style={styles.bpmBackdrop} onPress={() => setShowBpm(false)}>
+          <Pressable style={styles.bpmCard} onPress={() => {}}>
+            <Text style={styles.bpmCardTitle}>BEAT GRID</Text>
+            <Text style={styles.bpmCardHint}>
+              Set the song BPM and every cut snaps to the beat on export.
+            </Text>
+            <TextInput
+              style={styles.bpmInput}
+              value={bpmDraft}
+              onChangeText={setBpmDraft}
+              keyboardType="numeric"
+              placeholder="e.g. 120"
+              placeholderTextColor={colors.info}
+              testID="bpm-input"
+            />
+            <View style={styles.bpmSnapRow}>
+              <Text style={styles.bpmSnapTxt}>Snap cuts to beat</Text>
+              <Switch
+                value={snapDraft}
+                onValueChange={setSnapDraft}
+                trackColor={{ true: colors.brandPrimary, false: colors.borderStrong }}
+                thumbColor={colors.onSurface}
+                testID="snap-switch"
+              />
+            </View>
+            <Pressable style={styles.bpmSave} onPress={saveBpm} testID="bpm-save">
+              <Text style={styles.bpmSaveTxt}>Save</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -593,6 +640,63 @@ const styles = StyleSheet.create({
   timeLabel: { color: colors.onSurface, fontFamily: font.display, fontSize: 16, letterSpacing: 0.5 },
   timeDim: { color: colors.info },
   clipCount: { color: colors.brandSecondary, fontFamily: font.displaySemi, fontSize: 12, letterSpacing: 1 },
+  bpmPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,122,132,0.14)",
+    borderWidth: 1,
+    borderColor: colors.brandTertiary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.sm,
+    marginRight: spacing.sm,
+  },
+  bpmTxt: { color: colors.brandSecondary, fontFamily: font.displaySemi, fontSize: 12, letterSpacing: 0.5 },
+  bpmBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  bpmCard: {
+    width: "100%",
+    maxWidth: 360,
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.xl,
+  },
+  bpmCardTitle: { color: colors.onSurface, fontFamily: font.display, fontSize: 24, letterSpacing: 1.5 },
+  bpmCardHint: { color: colors.info, fontFamily: font.body, fontSize: 13, lineHeight: 19, marginTop: spacing.xs, marginBottom: spacing.md },
+  bpmInput: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.onSurface,
+    fontFamily: font.display,
+    fontSize: 28,
+    textAlign: "center",
+    paddingVertical: spacing.md,
+  },
+  bpmSnapRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: spacing.lg,
+  },
+  bpmSnapTxt: { color: colors.onSurface, fontFamily: font.bodyMed, fontSize: 15 },
+  bpmSave: {
+    backgroundColor: colors.brandPrimary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    marginTop: spacing.lg,
+  },
+  bpmSaveTxt: { color: colors.onBrandPrimary, fontFamily: font.bodyBold, fontSize: 16 },
 
   toolStrip: { position: "absolute", right: spacing.lg, gap: spacing.md },
   toolBtn: {
