@@ -5,7 +5,33 @@ The mobile app just points its `EXPO_PUBLIC_BACKEND_URL` at your VPS.
 
 ---
 
-## A. Run the backend with Docker (recommended)
+## 0. Get the code on GitHub first
+
+In Emergent, click **Save to GitHub** (top of the workspace) to push this repo to
+your account (requires a paid plan). Then edit the install scripts' default
+`REPO_URL` (or pass it as an env var) to point at your repo.
+
+## Quick install (one-liner)
+
+**Linux / macOS** (on the VPS, Docker installed):
+```bash
+EMERGENT_LLM_KEY=sk-... \
+REPO_URL=https://github.com/<USER>/<REPO>.git \
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/<USER>/<REPO>/main/deploy/install.sh)"
+```
+
+**Windows (PowerShell)** with Docker Desktop:
+```powershell
+$env:EMERGENT_LLM_KEY="sk-..."; $env:REPO_URL="https://github.com/<USER>/<REPO>.git"
+iwr -useb https://raw.githubusercontent.com/<USER>/<REPO>/main/deploy/install.ps1 | iex
+```
+
+Both scripts: check Docker/git → clone (or pull) your repo → write `deploy/.env`
+→ `docker compose up -d --build`. Backend ends up live on `:8001`.
+
+---
+
+## A. Manual run with Docker (if you prefer)
 
 On the VPS (Docker + docker compose installed):
 
